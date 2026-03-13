@@ -10,3 +10,4 @@ When testing flows that send email (registration, password reset, invites, etc.)
 2. Perform the action that triggers the email.
 3. Poll the inbox directory for new .eml files. Emails typically arrive within a few seconds.
 4. Read the .eml file to extract links, codes, or tokens needed to continue the flow.
+5. Delete the .eml file after processing so it doesn't interfere with subsequent checks.
