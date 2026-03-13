@@ -162,7 +162,7 @@ func poll(ctx context.Context, client *resend.Client, prefix, domain, inboxPath 
 
 	latest := after
 	for _, email := range emails.Data {
-		created, err := time.Parse(time.RFC3339, email.CreatedAt)
+		created, err := parseTime(email.CreatedAt)
 		if err != nil {
 			continue
 		}
@@ -209,6 +209,25 @@ func poll(ctx context.Context, client *resend.Client, prefix, domain, inboxPath 
 	return latest
 }
 
+var timeFormats = []string{
+	time.RFC3339,
+	time.RFC3339Nano,
+	"2006-01-02 15:04:05.999999-07",
+	"2006-01-02 15:04:05.999999+00",
+	"2006-01-02 15:04:05-07",
+	"2006-01-02 15:04:05+00",
+	"2006-01-02 15:04:05",
+}
+
+func parseTime(s string) (time.Time, error) {
+	for _, f := range timeFormats {
+		if t, err := time.Parse(f, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("cannot parse %q", s)
+}
+
 func downloadRaw(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -228,7 +247,7 @@ func downloadRaw(ctx context.Context, url string) ([]byte, error) {
 func buildRFC5322(email *resend.ReceivedEmail) []byte {
 	var b strings.Builder
 
-	if t, err := time.Parse(time.RFC3339, email.CreatedAt); err == nil {
+	if t, err := parseTime(email.CreatedAt); err == nil {
 		b.WriteString(fmt.Sprintf("Date: %s\r\n", t.Format(time.RFC1123Z)))
 	}
 	b.WriteString(fmt.Sprintf("From: %s\r\n", email.From))
@@ -258,7 +277,7 @@ func buildRFC5322(email *resend.ReceivedEmail) []byte {
 }
 
 func generateFilename(inboxPath, createdAt string) string {
-	t, err := time.Parse(time.RFC3339, createdAt)
+	t, err := parseTime(createdAt)
 	if err != nil {
 		t = time.Now()
 	}
