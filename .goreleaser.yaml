@@ -12,13 +12,5 @@ builds:
 archives:
   - format: tar.gz
 
-brews:
-  - repository:
-      owner: pagerguild
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: https://github.com/pagerguild/resend-listener
-    description: Poll Resend for received emails and write them as .eml files
-
 changelog:
   sort: asc
