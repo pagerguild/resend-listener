@@ -23,16 +23,24 @@ resend-listener [flags]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-prefix` | | Filter recipients by address prefix |
+| `-prefix` | `{repo}-{user}` | Filter recipients by address prefix. Pass `-prefix ''` to disable. |
 | `-domain` | | Filter recipients by domain |
 | `-path` | `./inbox` | Inbox directory path |
 | `-since` | `0s` | Look back duration (e.g. `10000h` for ~1 year) |
 | `-no-clear` | `false` | Don't empty the inbox directory on startup |
 | `-no-create` | `false` | Fail if the inbox directory doesn't exist |
 
+### Default prefix
+
+When `-prefix` is not specified, it is derived automatically from the current git repo name and `$USER`, joined with a hyphen. For example, in a repo with origin `github.com/pagerguild/myapp` and user `tyler`, the default prefix is `myapp-tyler`. This means only emails to `myapp-tyler*@...` will be captured.
+
+### filter.txt
+
+On startup, `<inbox>/filter.txt` is written with the active filter pattern (e.g. `resend-listener-tyler*@*`). Other tools can read this file to know what email addresses will be captured.
+
 ### Examples
 
-Listen for all new emails:
+Listen for new emails using the default prefix:
 ```
 export RESEND_API_KEY=re_...
 resend-listener

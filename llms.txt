@@ -1,0 +1,12 @@
+# resend-listener
+
+A background process that captures incoming emails and writes them as .eml files to an inbox directory.
+
+## Using email in tests
+
+When testing flows that send email (registration, password reset, invites, etc.):
+
+1. Read `<inbox>/filter.txt` to learn the active filter pattern (e.g. `myapp-tyler*@somedomain.com`). Use an email address matching this pattern when filling out forms or calling APIs.
+2. Perform the action that triggers the email.
+3. Poll the inbox directory for new .eml files. Emails typically arrive within a few seconds.
+4. Read the .eml file to extract links, codes, or tokens needed to continue the flow.

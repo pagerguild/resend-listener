@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -17,16 +18,21 @@ import (
 )
 
 func main() {
+	const unset = "\x00"
 	var prefix, domain, inboxPath, since string
 	var noClear, noCreate bool
 
-	flag.StringVar(&prefix, "prefix", "", "filter recipients by address prefix")
+	flag.StringVar(&prefix, "prefix", unset, "filter recipients by address prefix")
 	flag.StringVar(&domain, "domain", "", "filter recipients by domain")
 	flag.StringVar(&inboxPath, "path", "./inbox", "inbox directory path")
 	flag.StringVar(&since, "since", "0s", "look back duration (e.g. 10000h)")
 	flag.BoolVar(&noClear, "no-clear", false, "do not clean out inbox on startup")
 	flag.BoolVar(&noCreate, "no-create", false, "fail if inbox directory does not exist")
 	flag.Parse()
+
+	if prefix == unset {
+		prefix = defaultPrefix()
+	}
 
 	lookback, err := time.ParseDuration(since)
 	if err != nil {
@@ -41,6 +47,8 @@ func main() {
 	if err := setupInbox(inboxPath, noClear, noCreate); err != nil {
 		log.Fatalf("inbox setup: %v", err)
 	}
+
+	writeFilterFile(inboxPath, prefix, domain)
 
 	client := resend.NewClient(apiKey)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -88,6 +96,43 @@ func setupInbox(path string, noClear, noCreate bool) error {
 		}
 	}
 	return nil
+}
+
+func defaultPrefix() string {
+	var parts []string
+
+	out, err := exec.Command("git", "remote", "get-url", "origin").Output()
+	if err == nil {
+		name := strings.TrimSpace(string(out))
+		name = filepath.Base(name)
+		name = strings.TrimSuffix(name, ".git")
+		if name != "" {
+			parts = append(parts, name)
+		}
+	}
+
+	if user := os.Getenv("USER"); user != "" {
+		parts = append(parts, user)
+	}
+
+	return strings.Join(parts, "-")
+}
+
+func writeFilterFile(inboxPath, prefix, domain string) {
+	var pattern string
+	if prefix != "" {
+		pattern = prefix + "*"
+	} else {
+		pattern = "*"
+	}
+	if domain != "" {
+		pattern += "@" + domain
+	} else {
+		pattern += "@*"
+	}
+
+	msg := fmt.Sprintf("resend-listener is listening for emails matching %s\n", pattern)
+	os.WriteFile(filepath.Join(inboxPath, "filter.txt"), []byte(msg), 0644)
 }
 
 func matchesFilter(recipients []string, prefix, domain string) bool {
