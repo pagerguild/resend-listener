@@ -1,8 +1,28 @@
 # resend-listener
 
-A background process that captures incoming emails and writes them as .eml files to an inbox directory.
+A CLI for capturing incoming emails. Two modes:
 
-## Using email in tests
+- **One-shot (`-wait`)** — block until a single email arrives for a specific address, print it to stdout, exit. Best for agents verifying their own email during a test run.
+- **Daemon** — poll continuously and write every matching email as an `.eml` file into an inbox directory. Best for long-running test harnesses.
+
+## One-shot mode (recommended for agent self-verification)
+
+When an agent needs to receive a single email (e.g. verification code, magic link) for an address it just signed up with:
+
+```
+resend-listener -wait tester-12345@yourdomain.com > /tmp/msg.eml
+```
+
+Behavior:
+
+1. Blocks until an email arrives addressed exactly to that recipient.
+2. Match window is fixed at `[startup-1m, startup+1m]` — so it's safe to launch `resend-listener -wait` slightly before *or* after triggering the signup.
+3. On match: writes the raw RFC 5322 bytes to stdout and exits 0.
+4. On timeout: exits non-zero with `no email for <addr> within window` on stderr.
+
+Pipe stdout into a file (or directly into `grep`/`sed`) to extract codes or links.
+
+## Daemon mode (for test harnesses)
 
 When testing flows that send email (registration, password reset, invites, etc.):
 
