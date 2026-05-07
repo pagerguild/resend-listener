@@ -19,16 +19,36 @@ import (
 
 func main() {
 	const unset = "\x00"
-	var prefix, domain, inboxPath, since string
+	var prefix, domain, inboxPath, since, wait string
 	var noClear, noCreate bool
 
 	flag.StringVar(&prefix, "prefix", unset, "filter recipients by address prefix")
 	flag.StringVar(&domain, "domain", "", "filter recipients by domain")
 	flag.StringVar(&inboxPath, "path", "./inbox", "inbox directory path")
 	flag.StringVar(&since, "since", "0s", "look back duration (e.g. 10000h)")
+	flag.StringVar(&wait, "wait", "", "one-shot: block until an email arrives for this exact address, print it to stdout, exit")
 	flag.BoolVar(&noClear, "no-clear", false, "do not clean out inbox on startup")
 	flag.BoolVar(&noCreate, "no-create", false, "fail if inbox directory does not exist")
 	flag.Parse()
+
+	apiKey := os.Getenv("RESEND_API_KEY")
+	if apiKey == "" {
+		log.Fatal("RESEND_API_KEY environment variable is required")
+	}
+
+	client := resend.NewClient(apiKey)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	if wait != "" {
+		if !strings.Contains(wait, "@") {
+			log.Fatalf("-wait value %q is not an email address", wait)
+		}
+		if err := waitForEmail(ctx, client, wait); err != nil {
+			log.Fatalf("%v", err)
+		}
+		return
+	}
 
 	if prefix == unset {
 		prefix = defaultPrefix()
@@ -39,20 +59,11 @@ func main() {
 		log.Fatalf("invalid -since value: %v", err)
 	}
 
-	apiKey := os.Getenv("RESEND_API_KEY")
-	if apiKey == "" {
-		log.Fatal("RESEND_API_KEY environment variable is required")
-	}
-
 	if err := setupInbox(inboxPath, noClear, noCreate); err != nil {
 		log.Fatalf("inbox setup: %v", err)
 	}
 
 	writeFilterFile(inboxPath, prefix, domain)
-
-	client := resend.NewClient(apiKey)
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
 
 	lastChecked := time.Now().UTC().Add(-lookback)
 
@@ -207,6 +218,85 @@ func poll(ctx context.Context, client *resend.Client, prefix, domain, inboxPath 
 	}
 
 	return latest
+}
+
+func waitForEmail(ctx context.Context, client *resend.Client, address string) error {
+	address = strings.ToLower(strings.TrimSpace(address))
+	windowStart := time.Now().UTC().Add(-1 * time.Minute)
+	deadline := time.Now().UTC().Add(1 * time.Minute)
+
+	log.Printf("waiting for email to %s (until %s)", address, deadline.Format(time.RFC3339))
+
+	check := func() (bool, error) {
+		emails, err := client.Emails.Receiving.ListWithContext(ctx)
+		if err != nil {
+			return false, err
+		}
+		for _, email := range emails.Data {
+			created, err := parseTime(email.CreatedAt)
+			if err != nil {
+				continue
+			}
+			if created.Before(windowStart) || created.After(deadline) {
+				continue
+			}
+			matched := false
+			for _, to := range email.To {
+				if strings.ToLower(strings.TrimSpace(to)) == address {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+
+			full, err := client.Emails.Receiving.GetWithContext(ctx, email.Id)
+			if err != nil {
+				return false, fmt.Errorf("fetching email %s: %w", email.Id, err)
+			}
+			var content []byte
+			if full.Raw.DownloadUrl != "" {
+				content, err = downloadRaw(ctx, full.Raw.DownloadUrl)
+				if err != nil {
+					return false, fmt.Errorf("downloading raw email %s: %w", email.Id, err)
+				}
+			} else {
+				content = buildRFC5322(full)
+			}
+			if _, err := os.Stdout.Write(content); err != nil {
+				return false, err
+			}
+			log.Printf("matched email %s", email.Id)
+			return true, nil
+		}
+		return false, nil
+	}
+
+	if found, err := check(); err != nil {
+		log.Printf("poll error: %v", err)
+	} else if found {
+		return nil
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if found, err := check(); err != nil {
+				log.Printf("poll error: %v", err)
+			} else if found {
+				return nil
+			}
+			if !time.Now().UTC().Before(deadline) {
+				return fmt.Errorf("no email for %s within window", address)
+			}
+		}
+	}
 }
 
 var timeFormats = []string{
